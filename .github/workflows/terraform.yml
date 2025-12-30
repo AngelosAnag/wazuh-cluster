@@ -135,6 +135,7 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     needs: [lint, security]
+    environment: playground
     outputs:
       plan_exit_code: ${{ steps.plan.outputs.exitcode }}
     steps:
