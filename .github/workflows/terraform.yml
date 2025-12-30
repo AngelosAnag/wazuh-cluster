@@ -1,0 +1,308 @@
+name: Terraform CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  TF_VERSION: '1.7.0'
+  TF_WORKING_DIR: 'terraform'
+  AWS_REGION: 'eu-central-1'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  actions: read
+  security-events: write
+
+jobs:
+  # Lint and Validate
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive -diff
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Init (for validation)
+        run: terraform init -backend=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: TFLint Init
+        run: tflint --init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: TFLint Run
+        id: tflint
+        run: tflint --format compact --force
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+  # Security Scan with Trivy
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy (Report HIGH & CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: ${{ env.TF_WORKING_DIR }}
+          format: 'table'
+          exit-code: '0'
+          severity: 'HIGH,CRITICAL'
+          output: 'trivy-report.txt'
+
+      - name: Run Trivy (Fail on CRITICAL only)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: ${{ env.TF_WORKING_DIR }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+
+      - name: Run Trivy (SARIF for GitHub Security)
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          scan-type: 'config'
+          scan-ref: ${{ env.TF_WORKING_DIR }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Upload Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Upload Trivy Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-security-report
+          path: trivy-report.txt
+          retention-days: 90
+
+  # Terraform Plan
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [lint, security]
+    outputs:
+      plan_exit_code: ${{ steps.plan.outputs.exitcode }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Select Workspace
+        run: |
+          terraform workspace select wazuh || terraform workspace new wazuh
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan \
+            -var="trusted_ssh_cidr=${{ secrets.TRUSTED_SSH_CIDR }}" \
+            -var="ssh_public_key_path=/dev/null" \
+            2>&1 | tee plan_output.txt
+          
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
+      - name: Generate Plan JSON
+        if: steps.plan.outcome == 'success'
+        run: |
+          terraform show -json tfplan > tfplan.json
+          terraform show -no-color tfplan > tfplan.txt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Generate Resource Graph
+        if: steps.plan.outcome == 'success'
+        run: |
+          terraform graph -type=plan > graph.dot
+          
+          sudo apt-get update && sudo apt-get install -y graphviz
+          dot -Tpng graph.dot -o graph.png
+          dot -Tsvg graph.dot -o graph.svg
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Upload Plan Artifacts
+        uses: actions/upload-artifact@v4
+        if: steps.plan.outcome == 'success'
+        with:
+          name: terraform-plan-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ${{ env.TF_WORKING_DIR }}/tfplan
+            ${{ env.TF_WORKING_DIR }}/tfplan.json
+            ${{ env.TF_WORKING_DIR }}/tfplan.txt
+            ${{ env.TF_WORKING_DIR }}/plan_output.txt
+            ${{ env.TF_WORKING_DIR }}/graph.dot
+            ${{ env.TF_WORKING_DIR }}/graph.png
+            ${{ env.TF_WORKING_DIR }}/graph.svg
+          retention-days: 90
+
+      - name: Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  # Terraform Apply
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: plan
+    if:
+      github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Select Workspace
+        run: terraform workspace select wazuh
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-${{ github.run_number }}-${{ github.sha }}
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve tfplan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Capture Outputs
+        id: outputs
+        run: |
+          terraform output -json > outputs.json
+          terraform output -no-color > outputs.txt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Upload Apply Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ${{ env.TF_WORKING_DIR }}/outputs.json
+            ${{ env.TF_WORKING_DIR }}/outputs.txt
+          retention-days: 90
+
+  # Terraform Destroy
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    environment: production-destroy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Select Workspace
+        run: terraform workspace select wazuh
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Destroy
+        run: |
+          terraform destroy -input=false -auto-approve \
+            -var="trusted_ssh_cidr=${{ secrets.TRUSTED_SSH_CIDR }}" \
+            -var="ssh_public_key_path=/dev/null"
+        working-directory: ${{ env.TF_WORKING_DIR }}

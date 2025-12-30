@@ -2,19 +2,19 @@
 locals {
   wazuh_nodes = terraform.workspace == "wazuh" ? {
     indexer-1 = {
-      instance_type = "t3.large"
+      instance_type = "t3.small"
       private_ip    = "10.172.11.7"
       az            = "${var.aws_region}a"
       subnet_id     = module.wazuh_vpc.private_subnets[0]
-      volume_size   = 500
+      volume_size   = 50
       node_type     = "indexer"
     }
     indexer-2 = {
-      instance_type = "t3.large"
+      instance_type = "t3.small"
       private_ip    = "10.172.11.8"
       az            = "${var.aws_region}b"
       subnet_id     = module.wazuh_vpc.private_subnets[1]
-      volume_size   = 500
+      volume_size   = 50
       node_type     = "indexer"
     }
     master = {
@@ -26,7 +26,7 @@ locals {
       node_type     = "master"
     }
     worker-1 = {
-      instance_type = "t3.medium"
+      instance_type = "t3.small"
       private_ip    = "10.172.11.10"
       az            = "${var.aws_region}a"
       subnet_id     = module.wazuh_vpc.private_subnets[0]
@@ -34,7 +34,7 @@ locals {
       node_type     = "worker"
     }
     worker-2 = {
-      instance_type = "t3.medium"
+      instance_type = "t3.small"
       private_ip    = "10.172.11.11"
       az            = "${var.aws_region}b"
       subnet_id     = module.wazuh_vpc.private_subnets[1]
