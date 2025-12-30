@@ -1,0 +1,87 @@
+---
+# Wazuh Indexer installation and configuration
+
+- name: Install Wazuh Indexer
+  dnf:
+    name: wazuh-indexer
+    state: present
+
+- name: Create certificates directory
+  file:
+    path: "{{ indexer_cert_dir }}"
+    state: directory
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0750'
+
+- name: Copy node certificate
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/{{ node_name }}.pem"
+    dest: "{{ indexer_cert_dir }}/{{ node_name }}.pem"
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0440'
+
+- name: Copy node key
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/{{ node_name }}-key.pem"
+    dest: "{{ indexer_cert_dir }}/{{ node_name }}-key.pem"
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0400'
+
+- name: Copy root CA certificate
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/root-ca.pem"
+    dest: "{{ indexer_cert_dir }}/root-ca.pem"
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0440'
+
+- name: Copy admin certificate
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/admin.pem"
+    dest: "{{ indexer_cert_dir }}/admin.pem"
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0440'
+
+- name: Copy admin key
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/admin-key.pem"
+    dest: "{{ indexer_cert_dir }}/admin-key.pem"
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0400'
+
+- name: Configure Wazuh Indexer
+  template:
+    src: opensearch.yml.j2
+    dest: /etc/wazuh-indexer/opensearch.yml
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0640'
+  notify: Restart wazuh-indexer
+
+- name: Configure JVM heap size
+  template:
+    src: jvm.options.j2
+    dest: /etc/wazuh-indexer/jvm.options.d/heap.options
+    owner: wazuh-indexer
+    group: wazuh-indexer
+    mode: '0640'
+  notify: Restart wazuh-indexer
+
+- name: Enable and start Wazuh Indexer
+  systemd:
+    name: wazuh-indexer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for indexer to be ready
+  wait_for:
+    host: "{{ ansible_host }}"
+    port: 9200
+    delay: 10
+    timeout: 120

@@ -1,0 +1,64 @@
+---
+# Common configuration for all Wazuh nodes
+
+- name: Set hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Configure sysctl parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-wazuh.conf
+    reload: true
+  loop: "{{ sysctl_settings | dict2items }}"
+
+- name: Configure system limits
+  pam_limits:
+    domain: "{{ item.domain }}"
+    limit_type: "{{ item.type }}"
+    limit_item: "{{ item.item }}"
+    value: "{{ item.value }}"
+  loop: "{{ limits_settings }}"
+
+- name: Disable swap
+  command: swapoff -a
+  changed_when: false
+
+- name: Remove swap from fstab
+  lineinfile:
+    path: /etc/fstab
+    regexp: '.*swap.*'
+    state: absent
+
+- name: Import Wazuh GPG key
+  rpm_key:
+    key: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+    state: present
+
+- name: Add Wazuh repository
+  yum_repository:
+    name: wazuh
+    description: "Wazuh repository"
+    baseurl: "https://packages.wazuh.com/4.x/yum/"
+    gpgcheck: true
+    gpgkey: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+    enabled: true
+    protect: true
+
+- name: Install common packages
+  dnf:
+    name:
+      - curl
+      - wget
+      - vim
+      - htop
+      - jq
+      - tar
+      - unzip
+      - nc
+    state: present
+
+- name: Set timezone to UTC
+  timezone:
+    name: UTC

@@ -1,0 +1,80 @@
+---
+# Wazuh Dashboard installation and configuration
+
+- name: Install Wazuh Dashboard
+  dnf:
+    name: wazuh-dashboard
+    state: present
+
+- name: Create certificates directory
+  file:
+    path: "{{ dashboard_cert_dir }}"
+    state: directory
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0750'
+
+- name: Copy dashboard certificate
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/dashboard.pem"
+    dest: "{{ dashboard_cert_dir }}/dashboard.pem"
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0440'
+
+- name: Copy dashboard key
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/dashboard-key.pem"
+    dest: "{{ dashboard_cert_dir }}/dashboard-key.pem"
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0400'
+
+- name: Copy root CA certificate
+  copy:
+    src: "{{ playbook_dir }}/certs/wazuh-certificates/root-ca.pem"
+    dest: "{{ dashboard_cert_dir }}/root-ca.pem"
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0440'
+
+- name: Configure Wazuh Dashboard
+  template:
+    src: opensearch_dashboards.yml.j2
+    dest: /etc/wazuh-dashboard/opensearch_dashboards.yml
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0640'
+  notify: Restart wazuh-dashboard
+
+- name: Wait for manager to be fully ready
+  wait_for:
+    host: "{{ master_ip }}"
+    port: 55000
+    delay: 10
+    timeout: 120
+
+- name: Enable and start Wazuh Dashboard
+  systemd:
+    name: wazuh-dashboard
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for dashboard to be ready
+  wait_for:
+    host: "{{ ansible_host }}"
+    port: 443
+    delay: 10
+    timeout: 120
+
+- name: Verify dashboard is responding
+  uri:
+    url: "https://{{ ansible_host }}:443/app/wazuh"
+    method: GET
+    validate_certs: false
+    status_code: [200, 302]
+  register: dashboard_check
+  retries: 10
+  delay: 10
+  until: dashboard_check.status in [200, 302]

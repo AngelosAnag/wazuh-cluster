@@ -1,0 +1,56 @@
+---
+# Common variables for all Wazuh nodes
+
+# Wazuh version
+wazuh_version: "4.9"
+wazuh_revision: "2"
+
+# Cluster IPs
+indexer_1_ip: "10.172.11.7"
+indexer_2_ip: "10.172.11.8"
+master_ip: "10.172.11.9"
+worker_1_ip: "10.172.11.10"
+worker_2_ip: "10.172.11.11"
+
+# Indexer configuration
+indexer_cluster_name: "wazuh-cluster"
+indexer_jvm_heap: "4g"
+
+# Manager cluster configuration
+manager_cluster_name: "wazuh-cluster"
+manager_cluster_port: 1516
+
+# Certificate paths
+cert_gen_dir: "/tmp/wazuh-certificates"
+indexer_cert_dir: "/etc/wazuh-indexer/certs"
+manager_cert_dir: "/var/ossec/etc/indexer-certs"
+dashboard_cert_dir: "/etc/wazuh-dashboard/certs"
+
+# Default credentials (CHANGE AFTER DEPLOYMENT)
+indexer_admin_user: "admin"
+indexer_admin_password: "admin"
+
+# System tuning
+sysctl_settings:
+  vm.max_map_count: 262144
+  vm.swappiness: 1
+  net.core.somaxconn: 65535
+  net.ipv4.tcp_max_syn_backlog: 65535
+
+limits_settings:
+  - domain: "*"
+    type: soft
+    item: nofile
+    value: 65536
+  - domain: "*"
+    type: hard
+    item: nofile
+    value: 65536
+  - domain: "*"
+    type: soft
+    item: nproc
+    value: 4096
+  - domain: "*"
+    type: hard
+    item: nproc
+    value: 4096
