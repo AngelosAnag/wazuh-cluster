@@ -295,15 +295,15 @@ resource "aws_vpc_security_group_ingress_rule" "wazuh_dashboard" {
 }
 
 # Allow all outbound traffic
-resource "aws_vpc_security_group_egress_rule" "wazuh_all_outbound" {
+resource "aws_vpc_security_group_egress_rule" "wazuh_outbound" {
   security_group_id = aws_security_group.wazuh_cluster.id
-  description       = "Allow all outbound traffic"
+  description       = "Allow outbound traffic inside VPC"
 
   ip_protocol = "-1"
-  cidr_ipv4   = "0.0.0.0/0"
+  cidr_ipv4   = "10.0.0.0/8"
 
   tags = {
-    Name = "all-outbound"
+    Name = "wazuh-outbound"
   }
 }
 
@@ -337,13 +337,13 @@ resource "aws_vpc_security_group_ingress_rule" "bastion_ssh" {
 
 resource "aws_vpc_security_group_egress_rule" "bastion_outbound" {
   security_group_id = aws_security_group.bastion.id
-  description       = "Allow all outbound"
+  description       = "Allow outbound inside VPC"
 
   ip_protocol = "-1"
-  cidr_ipv4   = "0.0.0.0/0"
+  cidr_ipv4   = "10.0.0.0/8"
 
   tags = {
-    Name = "all-outbound"
+    Name = "bastion-outbound"
   }
 }
 
