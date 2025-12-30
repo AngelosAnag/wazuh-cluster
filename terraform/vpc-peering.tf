@@ -15,13 +15,13 @@
 variable "wazuh_peer_vpcs" {
   description = "Map of VPCs to peer with the Wazuh cluster VPC"
   type = map(object({
-    vpc_id         = string
-    vpc_cidr       = string
-    name           = string
+    vpc_id          = string
+    vpc_cidr        = string
+    name            = string
     route_table_ids = list(string)
     # Set to true if the peer VPC is in a different AWS account
-    cross_account  = optional(bool, false)
-    peer_owner_id  = optional(string, "")
+    cross_account = optional(bool, false)
+    peer_owner_id = optional(string, "")
   }))
   default = {}
 
@@ -203,9 +203,9 @@ output "peer_vpc_agent_config" {
       for k, v in aws_instance.wazuh_server_ec2 : v.private_ip
       if v.tags["NodeType"] == "worker"
     ]
-    agent_registration_port = 1515
+    agent_registration_port  = 1515
     agent_communication_port = 1514
-    required_outbound_rules = <<-EOT
+    required_outbound_rules  = <<-EOT
       # Add these outbound rules to security groups in peer VPCs:
       # TCP 1514 to ${var.wazuh_vpc_cidr} (agent events)
       # TCP 1515 to ${var.wazuh_vpc_cidr} (agent registration)
