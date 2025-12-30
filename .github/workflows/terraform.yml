@@ -219,56 +219,59 @@ jobs:
     needs: plan
     if:
       github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
-    environment: production
+    environment: playground
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-actions-terraform
+      - name: Test Step
+        run: echo "Terraform Apply step is currently disabled."
+        
+      # - name: Configure AWS Credentials (OIDC)
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      #     aws-region: ${{ env.AWS_REGION }}
+      #     role-session-name: github-actions-terraform
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
+      # - name: Setup Terraform
+      #   uses: hashicorp/setup-terraform@v3
+      #   with:
+      #     terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Terraform Init
-        run: terraform init -input=false
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      # - name: Terraform Init
+      #   run: terraform init -input=false
+      #   working-directory: ${{ env.TF_WORKING_DIR }}
 
-      - name: Select Workspace
-        run: terraform workspace select wazuh
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      # - name: Select Workspace
+      #   run: terraform workspace select wazuh
+      #   working-directory: ${{ env.TF_WORKING_DIR }}
 
-      - name: Download Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-plan-${{ github.run_number }}-${{ github.sha }}
-          path: ${{ env.TF_WORKING_DIR }}
+      # - name: Download Plan
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: terraform-plan-${{ github.run_number }}-${{ github.sha }}
+      #     path: ${{ env.TF_WORKING_DIR }}
 
-      - name: Terraform Apply
-        run: terraform apply -input=false -auto-approve tfplan
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      # - name: Terraform Apply
+      #   run: terraform apply -input=false -auto-approve tfplan
+      #   working-directory: ${{ env.TF_WORKING_DIR }}
 
-      - name: Capture Outputs
-        id: outputs
-        run: |
-          terraform output -json > outputs.json
-          terraform output -no-color > outputs.txt
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      # - name: Capture Outputs
+      #   id: outputs
+      #   run: |
+      #     terraform output -json > outputs.json
+      #     terraform output -no-color > outputs.txt
+      #   working-directory: ${{ env.TF_WORKING_DIR }}
 
-      - name: Upload Apply Outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-outputs-${{ github.run_number }}-${{ github.sha }}
-          path: |
-            ${{ env.TF_WORKING_DIR }}/outputs.json
-            ${{ env.TF_WORKING_DIR }}/outputs.txt
-          retention-days: 90
+      # - name: Upload Apply Outputs
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: terraform-outputs-${{ github.run_number }}-${{ github.sha }}
+      #     path: |
+      #       ${{ env.TF_WORKING_DIR }}/outputs.json
+      #       ${{ env.TF_WORKING_DIR }}/outputs.txt
+      #     retention-days: 90
 
   # Terraform Destroy
   destroy:
