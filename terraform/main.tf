@@ -37,10 +37,10 @@ data "aws_availability_zones" "available" {
 module "infrastructure" {
   source = "./infrastructure"
 
-  environment         = var.environment
-  vpc_cidr            = var.vpc_cidr
-  availability_zones  = slice(data.aws_availability_zones.available.names, 0, 3)
-  
+  environment        = var.environment
+  vpc_cidr           = var.vpc_cidr
+  availability_zones = slice(data.aws_availability_zones.available.names, 0, 3)
+
   # Allowed IPs for dashboard access
   allowed_cidr_blocks = var.allowed_cidr_blocks
 }
@@ -52,11 +52,11 @@ module "platform" {
   vpc_id             = module.infrastructure.vpc_id
   private_subnet_ids = module.infrastructure.private_subnet_ids
   public_subnet_ids  = module.infrastructure.public_subnet_ids
-  
+
   # Security groups from infrastructure
-  wazuh_node_sg_id   = module.infrastructure.wazuh_node_sg_id
-  alb_sg_id          = module.infrastructure.alb_sg_id
-  
+  wazuh_node_sg_id = module.infrastructure.wazuh_node_sg_id
+  alb_sg_id        = module.infrastructure.alb_sg_id
+
   # EC2 configuration
   instance_type       = var.instance_type
   key_name            = var.key_name
