@@ -1,0 +1,126 @@
+###############################################################################
+# SSM Document: Install Wazuh Indexer
+# Run this on ALL 3 nodes
+###############################################################################
+
+schemaVersion: "2.2"
+description: "Install and configure Wazuh Indexer"
+parameters:
+  NodeName:
+    type: String
+    description: "Node name (node-1, node-2, or node-3)"
+    allowedValues:
+      - node-1
+      - node-2
+      - node-3
+  Node1IP:
+    type: String
+    description: "Private IP of node-1"
+  Node2IP:
+    type: String
+    description: "Private IP of node-2"
+  Node3IP:
+    type: String
+    description: "Private IP of node-3"
+mainSteps:
+  - action: aws:runShellScript
+    name: InstallWazuhIndexer
+    inputs:
+      timeoutSeconds: "900"
+      runCommand:
+        - |
+          #!/bin/bash
+          set -e
+          
+          NODE_NAME="{{ NodeName }}"
+          NODE1_IP="{{ Node1IP }}"
+          NODE2_IP="{{ Node2IP }}"
+          NODE3_IP="{{ Node3IP }}"
+          
+          echo "=== Installing Wazuh Indexer on $NODE_NAME ==="
+          
+          # Get this node's IP based on node name
+          case $NODE_NAME in
+            node-1) THIS_IP=$NODE1_IP ;;
+            node-2) THIS_IP=$NODE2_IP ;;
+            node-3) THIS_IP=$NODE3_IP ;;
+          esac
+          
+          # Install prerequisites
+          apt-get update
+          apt-get install -y gnupg apt-transport-https
+          
+          # Add Wazuh repository
+          curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | \
+            gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import && \
+            chmod 644 /usr/share/keyrings/wazuh.gpg
+          
+          echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | \
+            tee /etc/apt/sources.list.d/wazuh.list
+          
+          apt-get update
+          
+          # Install Wazuh Indexer
+          apt-get install -y wazuh-indexer
+          
+          # Configure opensearch.yml
+          cat > /etc/wazuh-indexer/opensearch.yml << EOF
+          network.host: "$THIS_IP"
+          node.name: "$NODE_NAME"
+          
+          cluster.name: wazuh-cluster
+          cluster.initial_master_nodes:
+            - "node-1"
+            - "node-2"
+            - "node-3"
+          
+          discovery.seed_hosts:
+            - "$NODE1_IP"
+            - "$NODE2_IP"
+            - "$NODE3_IP"
+          
+          plugins.security.ssl.transport.pemcert_filepath: /etc/wazuh-indexer/certs/indexer.pem
+          plugins.security.ssl.transport.pemkey_filepath: /etc/wazuh-indexer/certs/indexer-key.pem
+          plugins.security.ssl.transport.pemtrustedcas_filepath: /etc/wazuh-indexer/certs/root-ca.pem
+          plugins.security.ssl.transport.enforce_hostname_verification: false
+          plugins.security.ssl.http.enabled: true
+          plugins.security.ssl.http.pemcert_filepath: /etc/wazuh-indexer/certs/indexer.pem
+          plugins.security.ssl.http.pemkey_filepath: /etc/wazuh-indexer/certs/indexer-key.pem
+          plugins.security.ssl.http.pemtrustedcas_filepath: /etc/wazuh-indexer/certs/root-ca.pem
+          
+          plugins.security.allow_unsafe_democertificates: false
+          plugins.security.allow_default_init_securityindex: true
+          plugins.security.authcz.admin_dn:
+            - "CN=admin,OU=Wazuh,O=Wazuh,L=California,C=US"
+          plugins.security.nodes_dn:
+            - "CN=node-1,OU=Wazuh,O=Wazuh,L=California,C=US"
+            - "CN=node-2,OU=Wazuh,O=Wazuh,L=California,C=US"
+            - "CN=node-3,OU=Wazuh,O=Wazuh,L=California,C=US"
+          
+          plugins.security.audit.type: internal_opensearch
+          plugins.security.enable_snapshot_restore_privilege: true
+          plugins.security.check_snapshot_restore_write_privileges: true
+          plugins.security.restapi.roles_enabled: ["all_access", "security_rest_api_access"]
+          plugins.security.system_indices.enabled: true
+          plugins.security.system_indices.indices: [".opendistro-*", ".plugins-*"]
+          
+          path.data: /var/lib/wazuh-indexer
+          path.logs: /var/log/wazuh-indexer
+          
+          ### Compatibility settings ###
+          compatibility.override_main_response_version: true
+          EOF
+          
+          # Ensure certificate ownership
+          chown -R wazuh-indexer:wazuh-indexer /etc/wazuh-indexer/certs
+          
+          # Enable and start service
+          systemctl daemon-reload
+          systemctl enable wazuh-indexer
+          systemctl start wazuh-indexer
+          
+          # Wait for service to start
+          sleep 10
+          
+          echo "=== Wazuh Indexer installed on $NODE_NAME ==="
+          systemctl status wazuh-indexer --no-pager

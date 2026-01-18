@@ -1,0 +1,89 @@
+###############################################################################
+# SSM Document: Generate Wazuh Certificates
+# Run this ONCE on node-1 to generate certificates for all nodes
+###############################################################################
+
+schemaVersion: "2.2"
+description: "Generate Wazuh SSL certificates for cluster deployment"
+parameters:
+  Node1IP:
+    type: String
+    description: "Private IP of node-1"
+  Node2IP:
+    type: String
+    description: "Private IP of node-2"
+  Node3IP:
+    type: String
+    description: "Private IP of node-3"
+  S3Bucket:
+    type: String
+    description: "S3 bucket to store certificates"
+    default: ""
+mainSteps:
+  - action: aws:runShellScript
+    name: GenerateCertificates
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          set -e
+          
+          echo "=== Generating Wazuh Certificates ==="
+          
+          cd /tmp
+          
+          # Download certificate tool
+          curl -sO https://packages.wazuh.com/4.14/wazuh-certs-tool.sh
+          curl -sO https://packages.wazuh.com/4.14/config.yml
+          
+          # Create config.yml with node IPs
+          cat > config.yml << 'EOF'
+          nodes:
+            indexer:
+              - name: node-1
+                ip: "{{ Node1IP }}"
+              - name: node-2
+                ip: "{{ Node2IP }}"
+              - name: node-3
+                ip: "{{ Node3IP }}"
+          
+            server:
+              - name: wazuh-1
+                ip: "{{ Node1IP }}"
+                node_type: master
+              - name: wazuh-2
+                ip: "{{ Node2IP }}"
+                node_type: worker
+          
+            dashboard:
+              - name: dashboard
+                ip: "{{ Node3IP }}"
+          EOF
+          
+          echo "Config file created:"
+          cat config.yml
+          
+          # Generate certificates
+          bash ./wazuh-certs-tool.sh -A
+          
+          # Package certificates
+          tar -cvf ./wazuh-certificates.tar -C ./wazuh-certificates/ .
+          
+          # Copy to a known location
+          mkdir -p /opt/wazuh-install
+          cp wazuh-certificates.tar /opt/wazuh-install/
+          chmod 600 /opt/wazuh-install/wazuh-certificates.tar
+          
+          echo "=== Certificates generated successfully ==="
+          echo "Location: /opt/wazuh-install/wazuh-certificates.tar"
+          
+          # Optionally upload to S3
+          if [ -n "{{ S3Bucket }}" ]; then
+            aws s3 cp /opt/wazuh-install/wazuh-certificates.tar s3://{{ S3Bucket }}/wazuh-certificates.tar
+            echo "Uploaded to s3://{{ S3Bucket }}/wazuh-certificates.tar"
+          fi
+          
+          # Cleanup
+          rm -rf /tmp/wazuh-certificates /tmp/config.yml /tmp/wazuh-certs-tool.sh
+          
+          echo "=== Done ==="

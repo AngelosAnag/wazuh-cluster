@@ -1,0 +1,104 @@
+###############################################################################
+# SSM Document: Install Wazuh Dashboard
+# Run this on node-3 only
+###############################################################################
+
+schemaVersion: "2.2"
+description: "Install and configure Wazuh Dashboard"
+parameters:
+  DashboardIP:
+    type: String
+    description: "Private IP of dashboard node (node-3)"
+  Node1IP:
+    type: String
+    description: "Private IP of node-1 (indexer)"
+  Node2IP:
+    type: String
+    description: "Private IP of node-2 (indexer)"
+  Node3IP:
+    type: String
+    description: "Private IP of node-3 (indexer)"
+  WazuhAPIIP:
+    type: String
+    description: "Private IP of Wazuh API (typically master - node-1)"
+mainSteps:
+  - action: aws:runShellScript
+    name: InstallWazuhDashboard
+    inputs:
+      timeoutSeconds: "900"
+      runCommand:
+        - |
+          #!/bin/bash
+          set -e
+          
+          DASHBOARD_IP="{{ DashboardIP }}"
+          NODE1_IP="{{ Node1IP }}"
+          NODE2_IP="{{ Node2IP }}"
+          NODE3_IP="{{ Node3IP }}"
+          WAZUH_API_IP="{{ WazuhAPIIP }}"
+          
+          echo "=== Installing Wazuh Dashboard ==="
+          
+          # Install Wazuh Dashboard
+          apt-get update
+          apt-get install -y wazuh-dashboard
+          
+          # Configure opensearch_dashboards.yml
+          cat > /etc/wazuh-dashboard/opensearch_dashboards.yml << EOF
+          server.host: 0.0.0.0
+          server.port: 443
+          
+          opensearch.hosts:
+            - https://$NODE1_IP:9200
+            - https://$NODE2_IP:9200
+            - https://$NODE3_IP:9200
+          
+          opensearch.ssl.verificationMode: certificate
+          opensearch.username: kibanaserver
+          opensearch.password: kibanaserver
+          opensearch.requestHeadersWhitelist: ["securitytenant","Authorization"]
+          
+          opensearch_security.multitenancy.enabled: false
+          opensearch_security.readonly_mode.roles: ["kibana_read_only"]
+          server.ssl.enabled: true
+          server.ssl.key: "/etc/wazuh-dashboard/certs/dashboard-key.pem"
+          server.ssl.certificate: "/etc/wazuh-dashboard/certs/dashboard.pem"
+          opensearch.ssl.certificateAuthorities: ["/etc/wazuh-dashboard/certs/root-ca.pem"]
+          
+          uiSettings.overrides.defaultRoute: /app/wazuh
+          EOF
+          
+          # Configure wazuh.yml for API connection
+          mkdir -p /usr/share/wazuh-dashboard/data/wazuh/config
+          cat > /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml << EOF
+          hosts:
+            - default:
+                url: https://$WAZUH_API_IP
+                port: 55000
+                username: wazuh-wui
+                password: wazuh-wui
+                run_as: false
+          EOF
+          
+          # Set ownership
+          chown -R wazuh-dashboard:wazuh-dashboard /etc/wazuh-dashboard/certs
+          chown -R wazuh-dashboard:wazuh-dashboard /usr/share/wazuh-dashboard/data/wazuh
+          
+          # Enable and start Dashboard
+          systemctl daemon-reload
+          systemctl enable wazuh-dashboard
+          systemctl start wazuh-dashboard
+          
+          # Wait for dashboard to start
+          sleep 30
+          
+          echo "=== Wazuh Dashboard Installation Complete ==="
+          echo ""
+          echo "Dashboard status:"
+          systemctl status wazuh-dashboard --no-pager || true
+          echo ""
+          echo "Dashboard should be accessible at: https://$DASHBOARD_IP"
+          echo ""
+          echo "Default credentials:"
+          echo "  Username: admin"
+          echo "  Password: admin (change this!)"

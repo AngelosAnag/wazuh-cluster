@@ -1,0 +1,53 @@
+###############################################################################
+# SSM Document: Initialize Wazuh Indexer Cluster
+# Run this ONCE on any indexer node AFTER all indexers are installed
+###############################################################################
+
+schemaVersion: "2.2"
+description: "Initialize Wazuh Indexer cluster security"
+parameters:
+  IndexerIP:
+    type: String
+    description: "IP of any indexer node to verify cluster"
+mainSteps:
+  - action: aws:runShellScript
+    name: InitializeCluster
+    inputs:
+      timeoutSeconds: "300"
+      runCommand:
+        - |
+          #!/bin/bash
+          set -e
+          
+          INDEXER_IP="{{ IndexerIP }}"
+          
+          echo "=== Initializing Wazuh Indexer Cluster ==="
+          
+          # Run security initialization script
+          /usr/share/wazuh-indexer/bin/indexer-security-init.sh
+          
+          echo "Waiting for cluster to stabilize..."
+          sleep 30
+          
+          # Verify cluster health
+          echo "=== Verifying Cluster ==="
+          
+          # Get admin password (generated during security init)
+          ADMIN_PASSWORD=$(grep "admin" /etc/wazuh-indexer/opensearch-security/internal_users.yml | head -1 | awk '{print $2}' | tr -d '"' || echo "admin")
+          
+          # Test cluster
+          echo "Testing cluster connectivity..."
+          curl -k -u admin:admin https://$INDEXER_IP:9200 || true
+          
+          echo ""
+          echo "Cluster nodes:"
+          curl -k -u admin:admin https://$INDEXER_IP:9200/_cat/nodes?v || true
+          
+          echo ""
+          echo "Cluster health:"
+          curl -k -u admin:admin https://$INDEXER_IP:9200/_cluster/health?pretty || true
+          
+          echo ""
+          echo "=== Indexer Cluster Initialization Complete ==="
+          echo ""
+          echo "IMPORTANT: Save the admin password from /etc/wazuh-indexer/opensearch-security/internal_users.yml"

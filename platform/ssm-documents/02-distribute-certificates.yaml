@@ -1,0 +1,99 @@
+###############################################################################
+# SSM Document: Distribute Wazuh Certificates
+# Run this on each node to deploy certificates from S3
+###############################################################################
+
+schemaVersion: "2.2"
+description: "Download and deploy Wazuh certificates to a node"
+parameters:
+  S3Bucket:
+    type: String
+    description: "S3 bucket containing wazuh-certificates.tar"
+  NodeName:
+    type: String
+    description: "Node name (node-1, node-2, or node-3)"
+    allowedValues:
+      - node-1
+      - node-2
+      - node-3
+mainSteps:
+  - action: aws:runShellScript
+    name: DeployCertificates
+    inputs:
+      runCommand:
+        - |
+          #!/bin/bash
+          set -e
+          
+          NODE_NAME="{{ NodeName }}"
+          S3_BUCKET="{{ S3Bucket }}"
+          
+          echo "=== Deploying certificates for $NODE_NAME ==="
+          
+          # Download certificates from S3
+          cd /tmp
+          aws s3 cp s3://$S3_BUCKET/wazuh-certificates.tar ./wazuh-certificates.tar
+          
+          # Create certificate directories
+          mkdir -p /etc/wazuh-indexer/certs
+          
+          # Extract certificates for this node
+          tar -xf ./wazuh-certificates.tar -C /etc/wazuh-indexer/certs/ \
+            ./$NODE_NAME.pem \
+            ./$NODE_NAME-key.pem \
+            ./admin.pem \
+            ./admin-key.pem \
+            ./root-ca.pem
+          
+          # Rename to standard names
+          mv -n /etc/wazuh-indexer/certs/$NODE_NAME.pem /etc/wazuh-indexer/certs/indexer.pem
+          mv -n /etc/wazuh-indexer/certs/$NODE_NAME-key.pem /etc/wazuh-indexer/certs/indexer-key.pem
+          
+          # Set permissions
+          chmod 500 /etc/wazuh-indexer/certs
+          chmod 400 /etc/wazuh-indexer/certs/*
+          
+          # If wazuh-indexer user exists, set ownership
+          if id "wazuh-indexer" &>/dev/null; then
+            chown -R wazuh-indexer:wazuh-indexer /etc/wazuh-indexer/certs
+          fi
+          
+          echo "Certificates deployed:"
+          ls -la /etc/wazuh-indexer/certs/
+          
+          # Also prepare for Wazuh Manager if this is node-1 or node-2
+          if [[ "$NODE_NAME" == "node-1" || "$NODE_NAME" == "node-2" ]]; then
+            echo "Preparing certificates for Wazuh Manager..."
+            mkdir -p /etc/filebeat/certs
+            
+            # Extract again for filebeat
+            tar -xf ./wazuh-certificates.tar -C /etc/filebeat/certs/ \
+              ./$NODE_NAME.pem \
+              ./$NODE_NAME-key.pem \
+              ./root-ca.pem
+            
+            mv -n /etc/filebeat/certs/$NODE_NAME.pem /etc/filebeat/certs/filebeat.pem
+            mv -n /etc/filebeat/certs/$NODE_NAME-key.pem /etc/filebeat/certs/filebeat-key.pem
+            
+            chmod 500 /etc/filebeat/certs
+            chmod 400 /etc/filebeat/certs/*
+          fi
+          
+          # Prepare for Dashboard if this is node-3
+          if [[ "$NODE_NAME" == "node-3" ]]; then
+            echo "Preparing certificates for Wazuh Dashboard..."
+            mkdir -p /etc/wazuh-dashboard/certs
+            
+            tar -xf ./wazuh-certificates.tar -C /etc/wazuh-dashboard/certs/ \
+              ./dashboard.pem \
+              ./dashboard-key.pem \
+              ./root-ca.pem
+            
+            chmod 500 /etc/wazuh-dashboard/certs
+            chmod 400 /etc/wazuh-dashboard/certs/*
+          fi
+          
+          # Cleanup
+          rm -f /tmp/wazuh-certificates.tar
+          
+          echo "=== Certificate deployment complete ==="
