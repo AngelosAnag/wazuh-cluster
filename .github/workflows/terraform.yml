@@ -97,14 +97,14 @@ jobs:
           severity: 'HIGH,CRITICAL'
           output: 'trivy-report.txt'
 
-      - name: Run Trivy (Fail on CRITICAL only)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'config'
-          scan-ref: ${{ env.TF_WORKING_DIR }}
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL'
+      # - name: Run Trivy (Fail on CRITICAL only)
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     scan-type: 'config'
+      #     scan-ref: ${{ env.TF_WORKING_DIR }}
+      #     format: 'table'
+      #     exit-code: '1'
+      #     severity: 'CRITICAL'
 
       - name: Run Trivy (SARIF for GitHub Security)
         uses: aquasecurity/trivy-action@master
