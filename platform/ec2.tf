@@ -3,10 +3,16 @@
 ###############################################################################
 
 terraform {
+  required_version = ">= 1.0.0"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
     }
   }
 }
@@ -132,13 +138,13 @@ module "wazuh_nodes" {
   }
 
   # User data for initial setup
-  user_data = base64encode(templatefile("./platform/templates/user_data.sh", {
+  user_data = templatefile("${path.module}/templates/user_data.sh", {
     node_name    = each.key
     node_role    = each.value.role
-    manager_type = coalesce(each.value.manager_type, "none") # for dashboard-only nodes
+    manager_type = coalesce(each.value.manager_type, "none")
     environment  = var.environment
-    ebs_device   = "/dev/nvme1n1" # NVMe device name on Nitro instances
-  }))
+    ebs_device   = "/dev/nvme1n1"
+  })
 
   tags = {
     Name           = "wazuh-${var.environment}-${each.key}"

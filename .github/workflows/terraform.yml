@@ -27,7 +27,7 @@ on:
 
 env:
   TF_VERSION: '1.7.0'
-  TF_WORKING_DIR: 'terraform'
+  TF_WORKING_DIR: '.'
   AWS_REGION: 'eu-central-1'
 
 permissions:
@@ -288,7 +288,6 @@ jobs:
     name: Terraform Destroy
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
-    environment: production-destroy
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -311,11 +310,4 @@ jobs:
 
       - name: Select Workspace
         run: terraform workspace select wazuh
-        working-directory: ${{ env.TF_WORKING_DIR }}
-
-      - name: Terraform Destroy
-        run: |
-          terraform destroy -input=false -auto-approve \
-            -var="trusted_ssh_cidr=${{ secrets.TRUSTED_SSH_CIDR }}" \
-            -var="ssh_public_key_path=/dev/null"
         working-directory: ${{ env.TF_WORKING_DIR }}

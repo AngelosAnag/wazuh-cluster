@@ -2,7 +2,7 @@
 # SSM Documents for Wazuh Installation
 ###############################################################################
 
-# S3 Bucket for certificates (optional but recommended)
+# S3 Bucket for certificates
 resource "aws_s3_bucket" "wazuh_artifacts" {
   bucket = "wazuh-${var.environment}-artifacts-${random_id.bucket_suffix.hex}"
 
