@@ -56,7 +56,7 @@ output "ssh_connection_info" {
 
 output "wazuh_config_summary" {
   description = "Summary of Wazuh node configuration for config.yml"
-  value = <<-EOT
+  value       = <<-EOT
     
     ===== WAZUH CONFIG.YML TEMPLATE =====
     
@@ -106,16 +106,16 @@ output "ssm_documents" {
   value = {
     generate_certificates      = aws_ssm_document.generate_certificates.name
     distribute_certificates    = aws_ssm_document.distribute_certificates.name
-    install_indexer           = aws_ssm_document.install_indexer.name
+    install_indexer            = aws_ssm_document.install_indexer.name
     initialize_indexer_cluster = aws_ssm_document.initialize_indexer_cluster.name
-    install_manager           = aws_ssm_document.install_manager.name
-    install_dashboard         = aws_ssm_document.install_dashboard.name
+    install_manager            = aws_ssm_document.install_manager.name
+    install_dashboard          = aws_ssm_document.install_dashboard.name
   }
 }
 
 output "installation_commands" {
   description = "AWS CLI commands to run SSM documents in order"
-  value = <<-EOT
+  value       = <<-EOT
     
     ===== WAZUH INSTALLATION STEPS =====
     

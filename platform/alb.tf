@@ -10,7 +10,7 @@ resource "aws_lb" "alb" {
   security_groups    = [var.alb_sg_id]
   subnets            = var.public_subnet_ids
 
-  enable_deletion_protection = false  # Set to true for production
+  enable_deletion_protection = false # Set to true for production
 
   tags = {
     Name        = "wazuh-${var.environment}-alb"

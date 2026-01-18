@@ -23,7 +23,7 @@ variable "vpc_cidr" {
 variable "allowed_cidr_blocks" {
   description = "CIDR blocks allowed to access the Wazuh dashboard (your office IPs, VPN, etc.)"
   type        = list(string)
-  default     = []  # IPs added in tfvars
+  default     = [] # IPs added in tfvars
 }
 
 variable "instance_type" {

@@ -127,17 +127,17 @@ module "wazuh_nodes" {
   # Enable detailed monitoring
   metadata_options = {
     http_endpoint               = "enabled"
-    http_tokens                 = "required"  # IMDSv2
+    http_tokens                 = "required" # IMDSv2
     http_put_response_hop_limit = 1
   }
 
   # User data for initial setup
   user_data = base64encode(templatefile("./platform/templates/user_data.sh", {
-    node_name      = each.key
-    node_role      = each.value.role
-    manager_type   = coalesce(each.value.manager_type, "none") # for dashboard-only nodes
-    environment    = var.environment
-    ebs_device     = "/dev/nvme1n1"  # NVMe device name on Nitro instances
+    node_name    = each.key
+    node_role    = each.value.role
+    manager_type = coalesce(each.value.manager_type, "none") # for dashboard-only nodes
+    environment  = var.environment
+    ebs_device   = "/dev/nvme1n1" # NVMe device name on Nitro instances
   }))
 
   tags = {

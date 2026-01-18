@@ -28,7 +28,7 @@ module "vpc" {
 
   # NAT Gateway for private subnet internet access
   enable_nat_gateway     = true
-  single_nat_gateway     = false  # One per AZ for HA
+  single_nat_gateway     = false # One per AZ for HA
   one_nat_gateway_per_az = true
 
   # DNS settings
