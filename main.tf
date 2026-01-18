@@ -10,11 +10,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "angelos-test-terraform-state"
-    key          = "wazuh-cluster-test/terraform.tfstate"
-    region       = "eu-central-1"
-    encrypt      = true
-    use_lockfile = true
+    bucket  = "angelos-test-terraform-state"
+    key     = "wazuh-cluster-test/terraform.tfstate"
+    region  = "eu-central-1"
+    encrypt = true
   }
 }
 
