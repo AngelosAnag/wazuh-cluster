@@ -32,10 +32,6 @@ mainSteps:
           # Verify cluster health
           echo "=== Verifying Cluster ==="
           
-          # Get admin password (generated during security init)
-          ADMIN_PASSWORD=$(grep "admin" /etc/wazuh-indexer/opensearch-security/internal_users.yml | head -1 | awk '{print $2}' | tr -d '"' || echo "admin")
-          
-          # Test cluster
           echo "Testing cluster connectivity..."
           curl -k -u admin:admin https://$INDEXER_IP:9200 || true
           
@@ -50,4 +46,4 @@ mainSteps:
           echo ""
           echo "=== Indexer Cluster Initialization Complete ==="
           echo ""
-          echo "IMPORTANT: Save the admin password from /etc/wazuh-indexer/opensearch-security/internal_users.yml"
+          echo "IMPORTANT: Default admin password is 'admin' - change it!"

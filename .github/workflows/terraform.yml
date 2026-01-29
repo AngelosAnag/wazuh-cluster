@@ -5,13 +5,17 @@ on:
     branches:
       - main
     paths:
-      - 'terraform/**'
+      - '01-infrastructure/**'
+      - '02-platform/**'
+      - '03-wazuh-install/**'
       - '.github/workflows/terraform.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'terraform/**'
+      - '01-infrastructure/**'
+      - '02-platform/**'
+      - '03-wazuh-install/**'
       - '.github/workflows/terraform.yml'
   workflow_dispatch:
     inputs:
@@ -24,10 +28,19 @@ on:
           - plan
           - apply
           - destroy
+      layer:
+        description: 'Layer to target (or all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - 01-infrastructure
+          - 02-platform
+          - 03-wazuh-install
 
 env:
   TF_VERSION: '1.7.0'
-  TF_WORKING_DIR: '.'
   AWS_REGION: 'eu-central-1'
 
 permissions:
@@ -38,10 +51,45 @@ permissions:
   security-events: write
 
 jobs:
-  # Lint and Validate
+  # Detect which layers changed
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      infra_changed: ${{ steps.changes.outputs.infra }}
+      platform_changed: ${{ steps.changes.outputs.platform }}
+      install_changed: ${{ steps.changes.outputs.install }}
+      any_changed: ${{ steps.changes.outputs.any }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            infra:
+              - '01-infrastructure/**'
+            platform:
+              - '02-platform/**'
+            install:
+              - '03-wazuh-install/**'
+            any:
+              - '01-infrastructure/**'
+              - '02-platform/**'
+              - '03-wazuh-install/**'
+
+  # Lint and Validate all layers
   lint:
     name: Lint & Validate
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        layer: [01-infrastructure, 02-platform, 03-wazuh-install]
+      fail-fast: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,16 +102,17 @@ jobs:
       - name: Terraform Format Check
         id: fmt
         run: terraform fmt -check -recursive -diff
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ matrix.layer }}
+        continue-on-error: true
 
       - name: Terraform Init (for validation)
         run: terraform init -backend=false
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ matrix.layer }}
 
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ matrix.layer }}
 
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@v4
@@ -72,51 +121,44 @@ jobs:
 
       - name: TFLint Init
         run: tflint --init
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ matrix.layer }}
 
       - name: TFLint Run
         id: tflint
         run: tflint --format compact --force
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: ${{ matrix.layer }}
 
-  # Security Scan with Trivy
+  # Security Scan
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Trivy (Report HIGH & CRITICAL)
+      - name: Run Trivy on all layers
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'config'
-          scan-ref: ${{ env.TF_WORKING_DIR }}
+          scan-ref: '.'
           format: 'table'
           exit-code: '0'
           severity: 'HIGH,CRITICAL'
           output: 'trivy-report.txt'
 
-      # - name: Run Trivy (Fail on CRITICAL only)
-      #   uses: aquasecurity/trivy-action@master
-      #   with:
-      #     scan-type: 'config'
-      #     scan-ref: ${{ env.TF_WORKING_DIR }}
-      #     format: 'table'
-      #     exit-code: '1'
-      #     severity: 'CRITICAL'
-
-      - name: Run Trivy (SARIF for GitHub Security)
+      - name: Run Trivy (SARIF)
         uses: aquasecurity/trivy-action@master
         if: always()
         with:
           scan-type: 'config'
-          scan-ref: ${{ env.TF_WORKING_DIR }}
+          scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'HIGH,CRITICAL'
 
-      - name: Upload Trivy SARIF to GitHub Security
+      - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -130,26 +172,20 @@ jobs:
           path: trivy-report.txt
           retention-days: 90
 
-  # Terraform Plan
-  plan:
-    name: Terraform Plan
+  # Plan Infrastructure
+  plan-infrastructure:
+    name: Plan Infrastructure
     runs-on: ubuntu-latest
-    needs: [lint, security]
+    needs: [lint, security, detect-changes]
+    if: |
+      (needs.detect-changes.outputs.infra_changed == 'true' || github.event_name == 'workflow_dispatch') &&
+      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '01-infrastructure' || github.event.inputs.layer == '')
     environment: playground
     outputs:
       plan_exit_code: ${{ steps.plan.outputs.exitcode }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-            
-      - name: Debug secrets
-        run: |
-          if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
-            echo "AWS_ROLE_ARN is empty or not set!"
-            exit 1
-          else
-            echo "AWS_ROLE_ARN is set (not showing value for security)"
-          fi
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -165,129 +201,187 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform Init
-        id: init
         run: terraform init -input=false
-        working-directory: ${{ env.TF_WORKING_DIR }}
-
-      - name: Select Workspace
-        run: |
-          terraform workspace select wazuh || terraform workspace new wazuh
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: 01-infrastructure
 
       - name: Terraform Plan
         id: plan
         run: |
           terraform plan -input=false -no-color -out=tfplan \
-            -var="trusted_ssh_cidr=${{ secrets.TRUSTED_SSH_CIDR }}" \
-            -var="ssh_public_key_path=/dev/null" \
+            -var="allowed_cidr_blocks=${{ secrets.ALLOWED_CIDR_BLOCKS }}" \
             2>&1 | tee plan_output.txt
-          
           echo "exitcode=$?" >> $GITHUB_OUTPUT
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: 01-infrastructure
         continue-on-error: true
 
-      - name: Generate Plan JSON
+      - name: Generate Plan Artifacts
         if: steps.plan.outcome == 'success'
         run: |
           terraform show -json tfplan > tfplan.json
           terraform show -no-color tfplan > tfplan.txt
-        working-directory: ${{ env.TF_WORKING_DIR }}
-
-      - name: Generate Resource Graph
-        if: steps.plan.outcome == 'success'
-        run: |
-          terraform graph -type=plan > graph.dot
-          
-          sudo apt-get update && sudo apt-get install -y graphviz
-          dot -Tpng graph.dot -o graph.png
-          dot -Tsvg graph.dot -o graph.svg
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: 01-infrastructure
 
       - name: Upload Plan Artifacts
         uses: actions/upload-artifact@v4
         if: steps.plan.outcome == 'success'
         with:
-          name: terraform-plan-${{ github.run_number }}-${{ github.sha }}
+          name: plan-01-infrastructure-${{ github.run_number }}
           path: |
-            ${{ env.TF_WORKING_DIR }}/tfplan
-            ${{ env.TF_WORKING_DIR }}/tfplan.json
-            ${{ env.TF_WORKING_DIR }}/tfplan.txt
-            ${{ env.TF_WORKING_DIR }}/plan_output.txt
-            ${{ env.TF_WORKING_DIR }}/graph.dot
-            ${{ env.TF_WORKING_DIR }}/graph.png
-            ${{ env.TF_WORKING_DIR }}/graph.svg
+            01-infrastructure/tfplan
+            01-infrastructure/tfplan.json
+            01-infrastructure/tfplan.txt
+            01-infrastructure/plan_output.txt
           retention-days: 90
 
       - name: Plan Status
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-  # Terraform Apply
-  apply:
-    name: Terraform Apply
+  # Plan Platform
+  plan-platform:
+    name: Plan Platform
     runs-on: ubuntu-latest
-    needs: plan
-    if:
-      github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    needs: [lint, security, detect-changes, plan-infrastructure]
+    if: |
+      always() &&
+      (needs.plan-infrastructure.result == 'success' || needs.plan-infrastructure.result == 'skipped') &&
+      (needs.detect-changes.outputs.platform_changed == 'true' || github.event_name == 'workflow_dispatch') &&
+      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '02-platform' || github.event.inputs.layer == '')
     environment: playground
+    outputs:
+      plan_exit_code: ${{ steps.plan.outputs.exitcode }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test Step
-        run: echo "Terraform Apply step is currently disabled."
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
 
-      # - name: Configure AWS Credentials (OIDC)
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-      #     aws-region: ${{ env.AWS_REGION }}
-      #     role-session-name: github-actions-terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
 
-      # - name: Setup Terraform
-      #   uses: hashicorp/setup-terraform@v3
-      #   with:
-      #     terraform_version: ${{ env.TF_VERSION }}
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: 02-platform
 
-      # - name: Terraform Init
-      #   run: terraform init -input=false
-      #   working-directory: ${{ env.TF_WORKING_DIR }}
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan \
+            -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            2>&1 | tee plan_output.txt
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+        working-directory: 02-platform
+        continue-on-error: true
 
-      # - name: Select Workspace
-      #   run: terraform workspace select wazuh
-      #   working-directory: ${{ env.TF_WORKING_DIR }}
+      - name: Generate Plan Artifacts
+        if: steps.plan.outcome == 'success'
+        run: |
+          terraform show -json tfplan > tfplan.json
+          terraform show -no-color tfplan > tfplan.txt
+        working-directory: 02-platform
 
-      # - name: Download Plan
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: terraform-plan-${{ github.run_number }}-${{ github.sha }}
-      #     path: ${{ env.TF_WORKING_DIR }}
+      - name: Upload Plan Artifacts
+        uses: actions/upload-artifact@v4
+        if: steps.plan.outcome == 'success'
+        with:
+          name: plan-02-platform-${{ github.run_number }}
+          path: |
+            02-platform/tfplan
+            02-platform/tfplan.json
+            02-platform/tfplan.txt
+            02-platform/plan_output.txt
+          retention-days: 90
 
-      # - name: Terraform Apply
-      #   run: terraform apply -input=false -auto-approve tfplan
-      #   working-directory: ${{ env.TF_WORKING_DIR }}
+      - name: Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
 
-      # - name: Capture Outputs
-      #   id: outputs
-      #   run: |
-      #     terraform output -json > outputs.json
-      #     terraform output -no-color > outputs.txt
-      #   working-directory: ${{ env.TF_WORKING_DIR }}
-
-      # - name: Upload Apply Outputs
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: terraform-outputs-${{ github.run_number }}-${{ github.sha }}
-      #     path: |
-      #       ${{ env.TF_WORKING_DIR }}/outputs.json
-      #       ${{ env.TF_WORKING_DIR }}/outputs.txt
-      #     retention-days: 90
-
-  # Terraform Destroy
-  destroy:
-    name: Terraform Destroy
+  # Plan Wazuh Install
+  plan-wazuh-install:
+    name: Plan Wazuh Install
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    needs: [lint, security, detect-changes, plan-platform]
+    if: |
+      always() &&
+      (needs.plan-platform.result == 'success' || needs.plan-platform.result == 'skipped') &&
+      (needs.detect-changes.outputs.install_changed == 'true' || github.event_name == 'workflow_dispatch') &&
+      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '03-wazuh-install' || github.event.inputs.layer == '')
+    environment: playground
+    outputs:
+      plan_exit_code: ${{ steps.plan.outputs.exitcode }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: 03-wazuh-install
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan \
+            -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -var="auto_install=false" \
+            2>&1 | tee plan_output.txt
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+        working-directory: 03-wazuh-install
+        continue-on-error: true
+
+      - name: Generate Plan Artifacts
+        if: steps.plan.outcome == 'success'
+        run: |
+          terraform show -json tfplan > tfplan.json
+          terraform show -no-color tfplan > tfplan.txt
+        working-directory: 03-wazuh-install
+
+      - name: Upload Plan Artifacts
+        uses: actions/upload-artifact@v4
+        if: steps.plan.outcome == 'success'
+        with:
+          name: plan-03-wazuh-install-${{ github.run_number }}
+          path: |
+            03-wazuh-install/tfplan
+            03-wazuh-install/tfplan.json
+            03-wazuh-install/tfplan.txt
+            03-wazuh-install/plan_output.txt
+          retention-days: 90
+
+      - name: Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  # Apply Infrastructure
+  apply-infrastructure:
+    name: Apply Infrastructure
+    runs-on: ubuntu-latest
+    needs: [plan-infrastructure]
+    if: |
+      github.event_name == 'workflow_dispatch' && 
+      github.event.inputs.action == 'apply' &&
+      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '01-infrastructure')
+    environment: playground
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -306,8 +400,206 @@ jobs:
 
       - name: Terraform Init
         run: terraform init -input=false
-        working-directory: ${{ env.TF_WORKING_DIR }}
+        working-directory: 01-infrastructure
 
-      - name: Select Workspace
-        run: terraform workspace select wazuh
-        working-directory: ${{ env.TF_WORKING_DIR }}
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-01-infrastructure-${{ github.run_number }}
+          path: 01-infrastructure
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve tfplan
+        working-directory: 01-infrastructure
+
+      - name: Capture Outputs
+        run: |
+          terraform output -json > outputs.json
+          terraform output -no-color > outputs.txt
+        working-directory: 01-infrastructure
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-01-infrastructure-${{ github.run_number }}
+          path: |
+            01-infrastructure/outputs.json
+            01-infrastructure/outputs.txt
+          retention-days: 90
+
+  # Apply Platform
+  apply-platform:
+    name: Apply Platform
+    runs-on: ubuntu-latest
+    needs: [plan-platform, apply-infrastructure]
+    if: |
+      always() &&
+      (needs.apply-infrastructure.result == 'success' || needs.apply-infrastructure.result == 'skipped') &&
+      github.event_name == 'workflow_dispatch' && 
+      github.event.inputs.action == 'apply' &&
+      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '02-platform')
+    environment: playground
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: 02-platform
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-02-platform-${{ github.run_number }}
+          path: 02-platform
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve tfplan
+        working-directory: 02-platform
+
+      - name: Capture Outputs
+        run: |
+          terraform output -json > outputs.json
+          terraform output -no-color > outputs.txt
+        working-directory: 02-platform
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-02-platform-${{ github.run_number }}
+          path: |
+            02-platform/outputs.json
+            02-platform/outputs.txt
+          retention-days: 90
+
+  # Apply Wazuh Install
+  apply-wazuh-install:
+    name: Apply Wazuh Install
+    runs-on: ubuntu-latest
+    needs: [plan-wazuh-install, apply-platform]
+    if: |
+      always() &&
+      (needs.apply-platform.result == 'success' || needs.apply-platform.result == 'skipped') &&
+      github.event_name == 'workflow_dispatch' && 
+      github.event.inputs.action == 'apply' &&
+      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '03-wazuh-install')
+    environment: playground
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: 03-wazuh-install
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-03-wazuh-install-${{ github.run_number }}
+          path: 03-wazuh-install
+
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve tfplan
+        working-directory: 03-wazuh-install
+
+      - name: Capture Outputs
+        run: |
+          terraform output -json > outputs.json
+          terraform output -no-color > outputs.txt
+        working-directory: 03-wazuh-install
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-03-wazuh-install-${{ github.run_number }}
+          path: |
+            03-wazuh-install/outputs.json
+            03-wazuh-install/outputs.txt
+          retention-days: 90
+
+      - name: Trigger Wazuh Installation
+        if: success()
+        run: |
+          STEP_FUNCTION_ARN=$(terraform output -raw step_function_arn)
+          echo "Triggering Step Functions: $STEP_FUNCTION_ARN"
+          
+          aws stepfunctions start-execution \
+            --state-machine-arn "$STEP_FUNCTION_ARN" \
+            --name "github-actions-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+          
+          echo "Installation triggered! Monitor progress in AWS Console."
+        working-directory: 03-wazuh-install
+
+  # Destroy (reverse order)
+  destroy:
+    name: Destroy All
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    environment: playground
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Destroy in reverse order: 03 -> 02 -> 01
+      - name: Destroy 03-wazuh-install
+        if: github.event.inputs.layer == 'all' || github.event.inputs.layer == '03-wazuh-install'
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve \
+            -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -var="auto_install=false"
+        working-directory: 03-wazuh-install
+        continue-on-error: true
+
+      - name: Destroy 02-platform
+        if: github.event.inputs.layer == 'all' || github.event.inputs.layer == '02-platform'
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve \
+            -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}"
+        working-directory: 02-platform
+        continue-on-error: true
+
+      - name: Destroy 01-infrastructure
+        if: github.event.inputs.layer == 'all' || github.event.inputs.layer == '01-infrastructure'
+        run: |
+          terraform init -input=false
+          terraform destroy -auto-approve \
+            -var="allowed_cidr_blocks=${{ secrets.ALLOWED_CIDR_BLOCKS }}"
+        working-directory: 01-infrastructure

@@ -46,22 +46,24 @@ mainSteps:
             node-3) THIS_IP=$NODE3_IP ;;
           esac
           
-          # Install prerequisites
-          apt-get update
-          apt-get install -y gnupg apt-transport-https
+          # Install prerequisites (Amazon Linux 2023)
+          dnf install -y coreutils
           
           # Add Wazuh repository
-          curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | \
-            gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import && \
-            chmod 644 /usr/share/keyrings/wazuh.gpg
+          rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH
           
-          echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | \
-            tee /etc/apt/sources.list.d/wazuh.list
-          
-          apt-get update
+          cat > /etc/yum.repos.d/wazuh.repo << 'REPO'
+          [wazuh]
+          gpgcheck=1
+          gpgkey=https://packages.wazuh.com/key/GPG-KEY-WAZUH
+          enabled=1
+          name=EL-$releasever - Wazuh
+          baseurl=https://packages.wazuh.com/4.x/yum/
+          protect=1
+          REPO
           
           # Install Wazuh Indexer
-          apt-get install -y wazuh-indexer
+          dnf install -y wazuh-indexer
           
           # Configure opensearch.yml
           cat > /etc/wazuh-indexer/opensearch.yml << EOF
@@ -107,20 +109,40 @@ mainSteps:
           path.data: /var/lib/wazuh-indexer
           path.logs: /var/log/wazuh-indexer
           
-          ### Compatibility settings ###
           compatibility.override_main_response_version: true
           EOF
           
-          # Ensure certificate ownership
+          # Verify certificates exist
+          echo "Verifying certificates..."
+          if [ ! -f /etc/wazuh-indexer/certs/indexer.pem ]; then
+            echo "ERROR: Certificate file not found at /etc/wazuh-indexer/certs/indexer.pem"
+            echo "Please run certificate distribution first"
+            exit 1
+          fi
+
+          # Ensure certificate ownership and permissions
           chown -R wazuh-indexer:wazuh-indexer /etc/wazuh-indexer/certs
-          
+          chmod 500 /etc/wazuh-indexer/certs
+          chmod 400 /etc/wazuh-indexer/certs/*
+
+          echo "Certificate files:"
+          ls -la /etc/wazuh-indexer/certs/
+
           # Enable and start service
           systemctl daemon-reload
           systemctl enable wazuh-indexer
           systemctl start wazuh-indexer
-          
-          # Wait for service to start
-          sleep 10
-          
+
+          # Wait for service to start and verify
+          echo "Waiting for indexer to start..."
+          sleep 15
+
+          # Check if service is running
+          if ! systemctl is-active --quiet wazuh-indexer; then
+            echo "ERROR: wazuh-indexer failed to start"
+            journalctl -u wazuh-indexer --no-pager -n 50
+            exit 1
+          fi
+
           echo "=== Wazuh Indexer installed on $NODE_NAME ==="
           systemctl status wazuh-indexer --no-pager

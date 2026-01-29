@@ -18,7 +18,6 @@ parameters:
   S3Bucket:
     type: String
     description: "S3 bucket to store certificates"
-    default: ""
 mainSteps:
   - action: aws:runShellScript
     name: GenerateCertificates
@@ -30,11 +29,17 @@ mainSteps:
           
           echo "=== Generating Wazuh Certificates ==="
           
+          # Install AWS CLI (not included by default on Amazon Linux 2023)
+          if ! command -v aws &> /dev/null; then
+            echo "Installing AWS CLI..."
+            dnf install -y awscli-2
+          fi
+          
           cd /tmp
           
           # Download certificate tool
-          curl -sO https://packages.wazuh.com/4.14/wazuh-certs-tool.sh
-          curl -sO https://packages.wazuh.com/4.14/config.yml
+          curl -sO https://packages.wazuh.com/4.10/wazuh-certs-tool.sh
+          chmod +x wazuh-certs-tool.sh
           
           # Create config.yml with node IPs
           cat > config.yml << 'EOF'
@@ -77,11 +82,9 @@ mainSteps:
           echo "=== Certificates generated successfully ==="
           echo "Location: /opt/wazuh-install/wazuh-certificates.tar"
           
-          # Optionally upload to S3
-          if [ -n "{{ S3Bucket }}" ]; then
-            aws s3 cp /opt/wazuh-install/wazuh-certificates.tar s3://{{ S3Bucket }}/wazuh-certificates.tar
-            echo "Uploaded to s3://{{ S3Bucket }}/wazuh-certificates.tar"
-          fi
+          # Upload to S3
+          aws s3 cp /opt/wazuh-install/wazuh-certificates.tar s3://{{ S3Bucket }}/wazuh-certificates.tar
+          echo "Uploaded to s3://{{ S3Bucket }}/wazuh-certificates.tar"
           
           # Cleanup
           rm -rf /tmp/wazuh-certificates /tmp/config.yml /tmp/wazuh-certs-tool.sh

@@ -1,34 +1,13 @@
 # Terraform
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
-*.tfplan
-crash.log
-crash.*.log
-
-# Sensitive files
-terraform.tfvars
 *.tfvars
 !*.tfvars.example
+.terraform.lock.hcl
 
-# SSH keys
-*.pem
-*.key
-
-# Certificates
-wazuh-certificates.tar
-wazuh-certificates/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Lambda
+*.zip
 
 # OS
 .DS_Store
-Thumbs.db
-
-# Logs
-*.log

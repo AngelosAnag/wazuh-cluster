@@ -54,18 +54,27 @@ mainSteps:
           
           echo "=== Installing Wazuh Manager ($NODE_TYPE) on $NODE_NAME ==="
           
+          # Ensure Wazuh repo is configured (Amazon Linux 2023)
+          if [ ! -f /etc/yum.repos.d/wazuh.repo ]; then
+            rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH
+            cat > /etc/yum.repos.d/wazuh.repo << 'REPO'
+          [wazuh]
+          gpgcheck=1
+          gpgkey=https://packages.wazuh.com/key/GPG-KEY-WAZUH
+          enabled=1
+          name=EL-$releasever - Wazuh
+          baseurl=https://packages.wazuh.com/4.x/yum/
+          protect=1
+          REPO
+          fi
+          
           # Install Wazuh Manager
-          apt-get update
-          apt-get install -y wazuh-manager
+          dnf install -y wazuh-manager
           
           # Configure cluster in ossec.conf
-          # First, backup original
           cp /var/ossec/etc/ossec.conf /var/ossec/etc/ossec.conf.bak
           
-          # Update cluster configuration
-          sed -i 's/<cluster>/<cluster>\n    <name>wazuh-cluster<\/name>/' /var/ossec/etc/ossec.conf
-          
-          # Use xmlstarlet or sed to update cluster config
+          # Create cluster config
           cat > /tmp/cluster-config.xml << EOF
             <cluster>
               <name>wazuh-cluster</name>
@@ -92,7 +101,6 @@ mainSteps:
           with open('/tmp/cluster-config.xml', 'r') as f:
               new_cluster = f.read()
           
-          # Replace cluster section
           pattern = r'<cluster>.*?</cluster>'
           content = re.sub(pattern, new_cluster.strip(), content, flags=re.DOTALL)
           
@@ -107,25 +115,19 @@ mainSteps:
           systemctl enable wazuh-manager
           systemctl start wazuh-manager
           
-          # Wait for manager to start
           sleep 15
           
           echo "=== Installing Filebeat ==="
           
-          # Install Filebeat
-          apt-get install -y filebeat
+          # Install Filebeat (Amazon Linux 2023)
+          dnf install -y filebeat
           
           # Download Wazuh Filebeat module
           curl -s https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz | \
             tar -xvz -C /usr/share/filebeat/module
           
-          # Download Filebeat config
-          curl -so /etc/filebeat/filebeat.yml \
-            https://packages.wazuh.com/4.14/tpl/wazuh/filebeat/filebeat.yml
-          
-          # Configure Filebeat to point to all indexers
+          # Configure Filebeat
           cat > /etc/filebeat/filebeat.yml << EOF
-          # Wazuh - Filebeat configuration file
           output.elasticsearch:
             hosts:
               - "$NODE1_IP:9200"
@@ -163,18 +165,34 @@ mainSteps:
           
           # Download Wazuh template
           curl -so /etc/filebeat/wazuh-template.json \
-            https://raw.githubusercontent.com/wazuh/wazuh/v4.14.0/extensions/elasticsearch/7.x/wazuh-template.json
+            https://raw.githubusercontent.com/wazuh/wazuh/v4.10.0/extensions/elasticsearch/7.x/wazuh-template.json
           
-          # Set permissions on certs
+          # Verify filebeat certificates exist
+          if [ ! -f /etc/filebeat/certs/filebeat.pem ]; then
+            echo "ERROR: Filebeat certificate not found"
+            exit 1
+          fi
+
+          # Set permissions and ownership
+          chown -R root:root /etc/filebeat/certs/
+          chmod 500 /etc/filebeat/certs
           chmod 400 /etc/filebeat/certs/*
-          
+
+          echo "Filebeat certificate files:"
+          ls -la /etc/filebeat/certs/
+
           # Enable and start Filebeat
           systemctl daemon-reload
           systemctl enable filebeat
           systemctl start filebeat
-          
+
           # Wait and verify
           sleep 10
+
+          if ! systemctl is-active --quiet filebeat; then
+            echo "WARNING: filebeat may not have started correctly"
+            journalctl -u filebeat --no-pager -n 30
+          fi
           
           echo "=== Wazuh Manager Installation Complete ==="
           echo ""

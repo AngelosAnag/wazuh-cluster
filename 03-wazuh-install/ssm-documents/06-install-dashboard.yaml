@@ -39,33 +39,47 @@ mainSteps:
           
           echo "=== Installing Wazuh Dashboard ==="
           
+          # Ensure Wazuh repo is configured (Amazon Linux 2023)
+          if [ ! -f /etc/yum.repos.d/wazuh.repo ]; then
+            rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH
+            cat > /etc/yum.repos.d/wazuh.repo << 'REPO'
+          [wazuh]
+          gpgcheck=1
+          gpgkey=https://packages.wazuh.com/key/GPG-KEY-WAZUH
+          enabled=1
+          name=EL-$releasever - Wazuh
+          baseurl=https://packages.wazuh.com/4.x/yum/
+          protect=1
+          REPO
+          fi
+          
           # Install Wazuh Dashboard
-          apt-get update
-          apt-get install -y wazuh-dashboard
+          dnf install -y wazuh-dashboard
           
           # Configure opensearch_dashboards.yml
           cat > /etc/wazuh-dashboard/opensearch_dashboards.yml << EOF
           server.host: 0.0.0.0
           server.port: 443
-          
+
           opensearch.hosts:
             - https://$NODE1_IP:9200
             - https://$NODE2_IP:9200
             - https://$NODE3_IP:9200
-          
+
           opensearch.ssl.verificationMode: certificate
           opensearch.username: kibanaserver
           opensearch.password: kibanaserver
           opensearch.requestHeadersWhitelist: ["securitytenant","Authorization"]
-          
+
           opensearch_security.multitenancy.enabled: false
           opensearch_security.readonly_mode.roles: ["kibana_read_only"]
           server.ssl.enabled: true
           server.ssl.key: "/etc/wazuh-dashboard/certs/dashboard-key.pem"
           server.ssl.certificate: "/etc/wazuh-dashboard/certs/dashboard.pem"
           opensearch.ssl.certificateAuthorities: ["/etc/wazuh-dashboard/certs/root-ca.pem"]
-          
-          uiSettings.overrides.defaultRoute: /app/wazuh
+
+          # IMPORTANT: Use wz-home for Wazuh 4.x (not /app/wazuh)
+          uiSettings.overrides.defaultRoute: /app/wz-home
           EOF
           
           # Configure wazuh.yml for API connection
@@ -80,25 +94,73 @@ mainSteps:
                 run_as: false
           EOF
           
-          # Set ownership
+          # Verify dashboard certificates exist
+          if [ ! -f /etc/wazuh-dashboard/certs/dashboard.pem ]; then
+            echo "ERROR: Dashboard certificate not found"
+            exit 1
+          fi
+
+          # CRITICAL: Ensure dashboard uses the same root-ca as the indexer
+          # This prevents "unable to verify the first certificate" errors
+          if [ -f /etc/wazuh-indexer/certs/root-ca.pem ]; then
+            echo "Syncing root-ca.pem from indexer certs..."
+            cp -f /etc/wazuh-indexer/certs/root-ca.pem /etc/wazuh-dashboard/certs/root-ca.pem
+          fi
+
+          # Set ownership and permissions
           chown -R wazuh-dashboard:wazuh-dashboard /etc/wazuh-dashboard/certs
+          chmod 500 /etc/wazuh-dashboard/certs
+          chmod 400 /etc/wazuh-dashboard/certs/*
           chown -R wazuh-dashboard:wazuh-dashboard /usr/share/wazuh-dashboard/data/wazuh
-          
+
+          echo "Dashboard certificate files:"
+          ls -la /etc/wazuh-dashboard/certs/
+
           # Enable and start Dashboard
           systemctl daemon-reload
           systemctl enable wazuh-dashboard
           systemctl start wazuh-dashboard
-          
-          # Wait for dashboard to start
+
+          # Wait for dashboard to fully initialize (plugin loading takes time)
+          echo "Waiting for dashboard to start and initialize plugins..."
+          echo "This may take up to 90 seconds on first boot..."
+
+          MAX_WAIT=90
+          WAITED=0
+          while [ $WAITED -lt $MAX_WAIT ]; do
+            if systemctl is-active --quiet wazuh-dashboard; then
+              # Check if dashboard is responding
+              if curl -sk https://localhost:443/api/status 2>/dev/null | grep -q "Looking good"; then
+                echo "Dashboard is up and responding!"
+                break
+              fi
+            fi
+            sleep 10
+            WAITED=$((WAITED + 10))
+            echo "Waited ${WAITED}s..."
+          done
+
+          # Restart dashboard once to ensure all plugins are properly loaded
+          # This helps avoid "Application Not Found" errors on first access
+          echo "Restarting dashboard to ensure plugins are fully loaded..."
+          systemctl restart wazuh-dashboard
           sleep 30
-          
+
+          if ! systemctl is-active --quiet wazuh-dashboard; then
+            echo "WARNING: Dashboard may still be starting..."
+            journalctl -u wazuh-dashboard --no-pager -n 50
+          fi
+
           echo "=== Wazuh Dashboard Installation Complete ==="
           echo ""
           echo "Dashboard status:"
           systemctl status wazuh-dashboard --no-pager || true
           echo ""
-          echo "Dashboard should be accessible at: https://$DASHBOARD_IP"
+          echo "Dashboard accessible at: https://$DASHBOARD_IP"
           echo ""
           echo "Default credentials:"
           echo "  Username: admin"
-          echo "  Password: admin (change this!)"
+          echo "  Password: admin (CHANGE THIS!)"
+          echo ""
+          echo "NOTE: If you see 'Application Not Found', navigate to:"
+          echo "  https://$DASHBOARD_IP/app/wz-home"

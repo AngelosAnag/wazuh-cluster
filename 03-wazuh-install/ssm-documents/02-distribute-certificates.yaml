@@ -30,6 +30,12 @@ mainSteps:
           
           echo "=== Deploying certificates for $NODE_NAME ==="
           
+          # Install AWS CLI (not included by default on Amazon Linux 2023)
+          if ! command -v aws &> /dev/null; then
+            echo "Installing AWS CLI..."
+            dnf install -y awscli-2
+          fi
+          
           # Download certificates from S3
           cd /tmp
           aws s3 cp s3://$S3_BUCKET/wazuh-certificates.tar ./wazuh-certificates.tar
@@ -45,38 +51,56 @@ mainSteps:
             ./admin-key.pem \
             ./root-ca.pem
           
-          # Rename to standard names
-          mv -n /etc/wazuh-indexer/certs/$NODE_NAME.pem /etc/wazuh-indexer/certs/indexer.pem
-          mv -n /etc/wazuh-indexer/certs/$NODE_NAME-key.pem /etc/wazuh-indexer/certs/indexer-key.pem
+          # Copy to standard names (using cp to always overwrite with fresh certs)
+          cp -f /etc/wazuh-indexer/certs/$NODE_NAME.pem /etc/wazuh-indexer/certs/indexer.pem
+          cp -f /etc/wazuh-indexer/certs/$NODE_NAME-key.pem /etc/wazuh-indexer/certs/indexer-key.pem
           
-          # Set permissions
+          # Set permissions (ownership will be set by install scripts when users exist)
           chmod 500 /etc/wazuh-indexer/certs
           chmod 400 /etc/wazuh-indexer/certs/*
-          
-          # If wazuh-indexer user exists, set ownership
+
+          # Try to set ownership if user exists, otherwise skip (install script will handle it)
           if id "wazuh-indexer" &>/dev/null; then
-            chown -R wazuh-indexer:wazuh-indexer /etc/wazuh-indexer/certs
+            chown -R wazuh-indexer:wazuh-indexer /etc/wazuh-indexer/certs/
+          else
+            echo "Note: wazuh-indexer user doesn't exist yet, ownership will be set during installation"
           fi
-          
-          echo "Certificates deployed:"
+
+          echo "Indexer certificates deployed:"
           ls -la /etc/wazuh-indexer/certs/
           
-          # Also prepare for Wazuh Manager if this is node-1 or node-2
+          # Prepare for Wazuh Manager if this is node-1 or node-2
           if [[ "$NODE_NAME" == "node-1" || "$NODE_NAME" == "node-2" ]]; then
             echo "Preparing certificates for Wazuh Manager..."
             mkdir -p /etc/filebeat/certs
             
-            # Extract again for filebeat
+            # Map node name to wazuh server name
+            if [[ "$NODE_NAME" == "node-1" ]]; then
+              WAZUH_NAME="wazuh-1"
+            else
+              WAZUH_NAME="wazuh-2"
+            fi
+            
             tar -xf ./wazuh-certificates.tar -C /etc/filebeat/certs/ \
-              ./$NODE_NAME.pem \
-              ./$NODE_NAME-key.pem \
+              ./$WAZUH_NAME.pem \
+              ./$WAZUH_NAME-key.pem \
               ./root-ca.pem
             
-            mv -n /etc/filebeat/certs/$NODE_NAME.pem /etc/filebeat/certs/filebeat.pem
-            mv -n /etc/filebeat/certs/$NODE_NAME-key.pem /etc/filebeat/certs/filebeat-key.pem
+            cp -f /etc/filebeat/certs/$WAZUH_NAME.pem /etc/filebeat/certs/filebeat.pem
+            cp -f /etc/filebeat/certs/$WAZUH_NAME-key.pem /etc/filebeat/certs/filebeat-key.pem
             
             chmod 500 /etc/filebeat/certs
             chmod 400 /etc/filebeat/certs/*
+
+            # Try to set ownership if user exists, otherwise skip
+            if id "filebeat" &>/dev/null; then
+              chown -R filebeat:filebeat /etc/filebeat/certs/
+            else
+              echo "Note: filebeat user doesn't exist yet, ownership will be set during installation"
+            fi
+
+            echo "Filebeat certificates deployed:"
+            ls -la /etc/filebeat/certs/
           fi
           
           # Prepare for Dashboard if this is node-3
@@ -91,6 +115,16 @@ mainSteps:
             
             chmod 500 /etc/wazuh-dashboard/certs
             chmod 400 /etc/wazuh-dashboard/certs/*
+
+            # Try to set ownership if user exists, otherwise skip
+            if id "wazuh-dashboard" &>/dev/null; then
+              chown -R wazuh-dashboard:wazuh-dashboard /etc/wazuh-dashboard/certs/
+            else
+              echo "Note: wazuh-dashboard user doesn't exist yet, ownership will be set during installation"
+            fi
+
+            echo "Dashboard certificates deployed:"
+            ls -la /etc/wazuh-dashboard/certs/
           fi
           
           # Cleanup
