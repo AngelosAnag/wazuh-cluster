@@ -455,7 +455,6 @@ jobs:
           set -o pipefail
           terraform plan -input=false -no-color -out=tfplan \
             -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -var="auto_install=false" \
             2>&1 | tee plan_output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         working-directory: 03-wazuh-install
