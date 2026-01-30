@@ -207,10 +207,11 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
+          set -o pipefail
           terraform plan -input=false -no-color -out=tfplan \
             -var="allowed_cidr_blocks=${{ secrets.ALLOWED_CIDR_BLOCKS }}" \
             2>&1 | tee plan_output.txt
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         working-directory: 01-infrastructure
         continue-on-error: true
 
@@ -274,10 +275,11 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
+          set -o pipefail
           terraform plan -input=false -no-color -out=tfplan \
             -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
             2>&1 | tee plan_output.txt
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         working-directory: 02-platform
         continue-on-error: true
 
@@ -341,11 +343,12 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
+          set -o pipefail
           terraform plan -input=false -no-color -out=tfplan \
             -var="state_bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -var="auto_install=false" \
             2>&1 | tee plan_output.txt
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
+          echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         working-directory: 03-wazuh-install
         continue-on-error: true
 
