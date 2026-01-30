@@ -85,7 +85,6 @@ jobs:
     name: Lint & Validate
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       matrix:
         layer: [01-infrastructure, 02-platform, 03-wazuh-install]
@@ -133,7 +132,6 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -177,9 +175,7 @@ jobs:
     name: Plan Infrastructure
     runs-on: ubuntu-latest
     needs: [lint, security, detect-changes]
-    if: |
-      (needs.detect-changes.outputs.infra_changed == 'true' || github.event_name == 'workflow_dispatch') &&
-      (github.event.inputs.layer == 'all' || github.event.inputs.layer == '01-infrastructure' || github.event.inputs.layer == '')
+    if: github.event.inputs.layer == 'all' || github.event.inputs.layer == '01-infrastructure' || github.event.inputs.layer == ''
     environment: playground
     outputs:
       plan_exit_code: ${{ steps.plan.outputs.exitcode }}
@@ -246,7 +242,6 @@ jobs:
     if: |
       always() &&
       (needs.plan-infrastructure.result == 'success' || needs.plan-infrastructure.result == 'skipped') &&
-      (needs.detect-changes.outputs.platform_changed == 'true' || github.event_name == 'workflow_dispatch') &&
       (github.event.inputs.layer == 'all' || github.event.inputs.layer == '02-platform' || github.event.inputs.layer == '')
     environment: playground
     outputs:
@@ -314,7 +309,6 @@ jobs:
     if: |
       always() &&
       (needs.plan-platform.result == 'success' || needs.plan-platform.result == 'skipped') &&
-      (needs.detect-changes.outputs.install_changed == 'true' || github.event_name == 'workflow_dispatch') &&
       (github.event.inputs.layer == 'all' || github.event.inputs.layer == '03-wazuh-install' || github.event.inputs.layer == '')
     environment: playground
     outputs:
