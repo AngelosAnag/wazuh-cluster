@@ -538,19 +538,6 @@ jobs:
             03-wazuh-install/outputs.txt
           retention-days: 90
 
-      - name: Trigger Wazuh Installation
-        if: success()
-        run: |
-          STEP_FUNCTION_ARN=$(terraform output -raw step_function_arn)
-          echo "Triggering Step Functions: $STEP_FUNCTION_ARN"
-
-          aws stepfunctions start-execution \
-            --state-machine-arn "$STEP_FUNCTION_ARN" \
-            --name "github-actions-${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
-
-          echo "Installation triggered! Monitor progress in AWS Console."
-        working-directory: 03-wazuh-install
-
   # Destroy (reverse order)
   destroy:
     name: Destroy All
