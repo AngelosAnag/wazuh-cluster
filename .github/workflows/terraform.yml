@@ -538,6 +538,84 @@ jobs:
             03-wazuh-install/outputs.txt
           retention-days: 90
 
+  # Run Wazuh Installation Script (after all layers are applied)
+  run-wazuh-install:
+    name: Run Wazuh Installation
+    runs-on: ubuntu-latest
+    needs: [apply-wazuh-install]
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.action == 'apply' &&
+      github.event.inputs.layer == 'all'
+    environment: playground
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-terraform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Get Platform Outputs
+        id: platform
+        run: |
+          terraform init -input=false
+          echo "node1_id=$(terraform output -raw node1_id)" >> $GITHUB_OUTPUT
+          echo "node2_id=$(terraform output -raw node2_id)" >> $GITHUB_OUTPUT
+          echo "node3_id=$(terraform output -raw node3_id)" >> $GITHUB_OUTPUT
+          echo "node1_ip=$(terraform output -raw node1_ip)" >> $GITHUB_OUTPUT
+          echo "node2_ip=$(terraform output -raw node2_ip)" >> $GITHUB_OUTPUT
+          echo "node3_ip=$(terraform output -raw node3_ip)" >> $GITHUB_OUTPUT
+          echo "s3_bucket=$(terraform output -raw s3_artifacts_bucket)" >> $GITHUB_OUTPUT
+          echo "environment=$(terraform output -raw environment)" >> $GITHUB_OUTPUT
+          echo "aws_region=$(terraform output -raw aws_region)" >> $GITHUB_OUTPUT
+          echo "dashboard_url=$(terraform output -raw dashboard_url)" >> $GITHUB_OUTPUT
+        working-directory: 02-platform
+
+      - name: Get Install Outputs
+        id: install
+        run: |
+          terraform init -input=false
+          echo "cluster_key=$(terraform output -raw cluster_key)" >> $GITHUB_OUTPUT
+        working-directory: 03-wazuh-install
+
+      - name: Run Wazuh Installation Script
+        env:
+          NODE1_ID: ${{ steps.platform.outputs.node1_id }}
+          NODE2_ID: ${{ steps.platform.outputs.node2_id }}
+          NODE3_ID: ${{ steps.platform.outputs.node3_id }}
+          NODE1_IP: ${{ steps.platform.outputs.node1_ip }}
+          NODE2_IP: ${{ steps.platform.outputs.node2_ip }}
+          NODE3_IP: ${{ steps.platform.outputs.node3_ip }}
+          S3_BUCKET: ${{ steps.platform.outputs.s3_bucket }}
+          ENV: ${{ steps.platform.outputs.environment }}
+          REGION: ${{ steps.platform.outputs.aws_region }}
+          DASHBOARD_URL: ${{ steps.platform.outputs.dashboard_url }}
+          CLUSTER_KEY: ${{ steps.install.outputs.cluster_key }}
+        run: |
+          chmod +x install-wazuh.sh
+          ./install-wazuh.sh --manual
+
+      - name: Installation Summary
+        if: success()
+        run: |
+          echo "=============================================="
+          echo "Wazuh Installation Complete!"
+          echo "=============================================="
+          echo "Dashboard URL: ${{ steps.platform.outputs.dashboard_url }}"
+          echo "Region: ${{ steps.platform.outputs.aws_region }}"
+          echo "Environment: ${{ steps.platform.outputs.environment }}"
+          echo "=============================================="
+
   # Destroy (reverse order)
   destroy:
     name: Destroy All
