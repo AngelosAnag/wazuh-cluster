@@ -22,5 +22,5 @@ variable "vpc_cidr" {
 variable "allowed_cidr_blocks" {
   description = "CIDR blocks allowed to access the Wazuh Dashboard (your office/VPN IPs)"
   type        = list(string)
-  default     = []
+  default     = ["94.63.96.238/32"]
 }

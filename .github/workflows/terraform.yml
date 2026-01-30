@@ -205,7 +205,6 @@ jobs:
         run: |
           set -o pipefail
           terraform plan -input=false -no-color -out=tfplan \
-            -var="allowed_cidr_blocks=${{ secrets.ALLOWED_CIDR_BLOCKS }}" \
             2>&1 | tee plan_output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         working-directory: 01-infrastructure
@@ -595,8 +594,10 @@ jobs:
 
       - name: Destroy 01-infrastructure
         if: github.event.inputs.layer == 'all' || github.event.inputs.layer == '01-infrastructure'
+        env:
+          TF_VAR_environment: playground
+          TF_VAR_allowed_cidr_blocks: ${{ secrets.ALLOWED_CIDR_BLOCKS }}
         run: |
           terraform init -input=false
-          terraform destroy -auto-approve \
-            -var="allowed_cidr_blocks=${{ secrets.ALLOWED_CIDR_BLOCKS }}"
+          terraform destroy -auto-approve
         working-directory: 01-infrastructure
